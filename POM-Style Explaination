@@ -1,0 +1,198 @@
+
+Generate the above selenium POM structure framework for the attached excel file with the data provider concept and enhance the above codes
+Sources
+Answer
+To implement a Selenium Page Object Model (POM) structure based on the provided Excel file ProxyDataSheet.xlsx, we will outline how to enhance the existing code by making it more modular and following the POM design pattern. The POM design pattern helps keep the test code clean, maintainable, and reusable by separating the page interactions from the test logic.
+Overview of Enhancements
+POM Structure: We'll create separate classes for the page objects corresponding to the web pages being tested. We'll have methods in these classes that represent actions that can be performed on the page.
+Data Provider Concept: The test cases will use TestNG's data provider to read data from the Excel sheet.
+Refactor Excel Utility: Improve the Excel utility to better handle reading and writing operations based on the new structure of the Excel file.
+Testing Framework Structure: Organize the code into appropriate packages and classes following Java conventions.
+Proposed Project Structure
+text
+src
+├── main
+│   └── java
+│       └── com
+│           └── example
+│               ├── pages
+│               │   └── ProxyPage.java
+│               ├── utils
+│               │   └── ExcelUtils.java
+│               └── tests
+│                   └── ProxyTest.java
+└── resources
+    └── ProxyDataSheet.xlsx
+Implementation Details
+1. ProxyPage.java
+This class will contain methods to interact with the web page.
+java
+package com.example.pages;
+
+import org.openqa.selenium.By;
+import org.openqa.selenium.WebDriver;
+import org.openqa.selenium.WebElement;
+
+public class ProxyPage {
+    private WebDriver driver;
+
+    public ProxyPage(WebDriver driver) {
+        this.driver = driver;
+    }
+
+    public void enterAccountName(String accountName) {
+        WebElement accountNameField = driver.findElement(By.name("accountName"));
+        accountNameField.clear();
+        accountNameField.sendKeys(accountName);
+    }
+
+    public boolean verifyUpcomingVisit(String expectedVisit) {
+        WebElement upcomingVisitsElement = driver.findElement(By.id("upcomingVisits"));
+        return upcomingVisitsElement.getText().trim().equalsIgnoreCase(expectedVisit.trim());
+    }
+
+    // Additional methods for other fields can be added here
+}
+2. ExcelUtils.java
+We will enhance the Excel utility to better handle reading the new structure.
+java
+package com.example.utils;
+
+import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+public class ExcelUtils {
+    private Workbook workbook;
+    private Sheet sheet;
+    private final String filePath;
+
+    public ExcelUtils(String filePath) throws IOException {
+        this.filePath = filePath;
+        FileInputStream fis = new FileInputStream(filePath);
+        workbook = new XSSFWorkbook(fis);
+        sheet = workbook.getSheetAt(0);
+    }
+
+    public int getRowCount() {
+        return sheet.getPhysicalNumberOfRows();
+    }
+
+    public Map<String, Object> getRowData(int rowIndex) {
+        Map<String, Object> rowData = new LinkedHashMap<>();
+        Row row = sheet.getRow(rowIndex);
+        int columnCount = row.getPhysicalNumberOfCells();
+
+        for (int i = 0; i < columnCount; i++) {
+            Cell cell = row.getCell(i);
+            rowData.put(getHeaderCellValue(i), cell != null ? cell.toString() : "");
+        }
+        return rowData;
+    }
+
+    private String getHeaderCellValue(int columnIndex) {
+        return sheet.getRow(0).getCell(columnIndex).getStringCellValue();
+    }
+
+    public void setCellData(int rowIndex, String columnName, String value) {
+        Row row = sheet.getRow(rowIndex);
+        int colIndex = getColumnIndex(columnName);
+        if (row == null) row = sheet.createRow(rowIndex);
+        Cell cell = row.getCell(colIndex, Row.MissingCellPolicy.CREATE_NULL_AS_BLANK);
+        cell.setCellValue(value);
+    }
+
+    private int getColumnIndex(String columnName) {
+        Row headerRow = sheet.getRow(0);
+        for (int i = 0; i < headerRow.getPhysicalNumberOfCells(); i++) {
+            if (headerRow.getCell(i).getStringCellValue().equalsIgnoreCase(columnName)) {
+                return i;
+            }
+        }
+        return -1; // Column not found
+    }
+
+    public void saveAndClose() throws IOException {
+        try (FileOutputStream fos = new FileOutputStream(filePath)) {
+            workbook.write(fos);
+        } finally {
+            workbook.close();
+        }
+    }
+}
+3. ProxyTest.java
+This will be the main test class that uses the Excel data provider.
+java
+package com.example.tests;
+
+import com.example.pages.ProxyPage;
+import com.example.utils.ExcelUtils;
+import io.cucumber.java.After;
+import io.cucumber.java.Before;
+import io.cucumber.java.en.Then;
+import org.openqa.selenium.WebDriver;
+import org.openqa.selenium.chrome.ChromeDriver;
+import org.testng.annotations.DataProvider;
+import org.testng.annotations.Test;
+
+import java.io.IOException;
+
+public class ProxyTest {
+    private WebDriver driver;
+    private ProxyPage proxyPage;
+    private ExcelUtils excel;
+    private final String filePath = "ProxyDataSheet.xlsx";
+
+    @Before
+    public void setUp() throws IOException {
+        driver = new ChromeDriver();
+        driver.get("URL_OF_THE_APPLICATION");
+        proxyPage = new ProxyPage(driver);
+        excel = new ExcelUtils(filePath);
+    }
+
+    @DataProvider(name = "proxyTestData")
+    public Object[][] getTestData() throws IOException {
+        int rowCount = excel.getRowCount();
+        Object[][] data = new Object[rowCount - 1][3]; // Adjust based on required columns
+
+        for (int i = 1; i < rowCount; i++) {
+            Map<String, Object> rowData = excel.getRowData(i);
+            if ("N".equalsIgnoreCase((String) rowData.get("Skip"))) {
+                data[i - 1][0] = rowData.get("Login UserName");
+                data[i - 1][1] = rowData.get("IN-AccountName");
+                data[i - 1][2] = rowData.get("IN-UpcomingVisits");
+            }
+        }
+        return data;
+    }
+
+    @Test(dataProvider = "proxyTestData")
+    public void executeProxyTests(String loginUser, String accountName, String expectedUpcomingVisit) {
+        proxyPage.enterAccountName(accountName);
+        boolean result = proxyPage.verifyUpcomingVisit(expectedUpcomingVisit);
+        String testResult = result ? "Pass" : "Fail";
+        excel.setCellData(rowIndex + 1, "O-UPcomingVisits", testResult); // Save results
+    }
+
+    @Then("I save the results back to the excel file")
+    public void saveResults() throws IOException {
+        excel.saveAndClose();
+    }
+
+    @After
+    public void tearDown() {
+        driver.quit();
+    }
+}
+Setup Steps
+Dependencies: Make sure to add the required dependencies in your pom.xml for Selenium, Cucumber, and Apache POI.
+Driver Setup: Set the path for the ChromeDriver executable correctly in your environment or in your code.
+Excel File: Place the ProxyDataSheet.xlsx file in the resources folder or update the file path in the code as needed.
+Conclusion
+With this implementation of the Selenium POM framework, you can organize your test cases effectively while leveraging data from an Excel file. The separation of concerns allows for easier maintenance and scalability, and the enhanced Excel utility provides robust interactions with your test data. This setup is ready for further enhancements as needed.
