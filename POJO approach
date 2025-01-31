@@ -1,0 +1,16 @@
+Generate POJO classes for the above using lambok and how to fetch the values from the from in-accountname and IN- columns if the Skip column is N using java selenium
+
+ChatGPT said:
+ChatGPT
+I'll generate the POJO classes using Lombok for efficient getter/setter handling and then provide the code for fetching the values from the IN-AccountName and IN-Columns if the Skip column is "N"** using Selenium in Java.
+
+Here’s how we’ll structure it:
+
+1️⃣ POJO Class for Test Data
+We’ll use Lombok annotations like @Data for automatic getter/setter generation.
+
+2️⃣ ExcelUtils to Read and Filter Data
+We’ll extract rows where "Skip" = "N" and retrieve values dynamically.
+
+3️⃣ Selenium Code to Use Extracted Data
+We’ll loop through the filtered data, fetch the "IN-AccountName" and other "IN-*" columns, and interact with the UI.
