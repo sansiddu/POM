@@ -1,0 +1,219 @@
+Overview of the Simplified Approach
+Read the input Excel file, filter "Skip = N" rows, and store the data in a list of POJOs.
+Execute Selenium test cases using the extracted values.
+Store the results (PASS/FAIL) in the "O-Result" column and save the output Excel file.
+
+
+1️⃣ POJO Class (ProxyTestData.java)
+This keeps our test data structured and easy to access.
+
+package models;
+
+import lombok.Data;
+import java.util.Map;
+
+@Data
+public class ProxyTestData {
+    private int rowIndex;
+    private String proxyUser;
+    private String accountName;
+    private Map<String, String> inputFields; // Stores all "IN-" columns
+}
+
+
+
+2️⃣ Excel Utility (ExcelUtils.java)
+This class: ✅ Reads the Excel file and extracts test data.
+✅ Filters out rows where Skip != N.
+✅ Returns a list of ProxyTestData objects.
+
+
+
+
+package utils;
+
+import models.ProxyTestData;
+import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import java.io.*;
+import java.util.*;
+
+public class ExcelUtils {
+    private Workbook workbook;
+    private Sheet sheet;
+    private Map<String, Integer> columnIndexMap = new HashMap<>();
+
+    public ExcelUtils(String filePath) throws Exception {
+        FileInputStream fis = new FileInputStream(new File(filePath));
+        workbook = new XSSFWorkbook(fis);
+        sheet = workbook.getSheetAt(0); // Read the first sheet
+        mapColumnIndexes();
+    }
+
+    private void mapColumnIndexes() {
+        Row headerRow = sheet.getRow(0);
+        for (Cell cell : headerRow) {
+            columnIndexMap.put(cell.getStringCellValue().trim(), cell.getColumnIndex());
+        }
+    }
+
+    public List<ProxyTestData> getTestData() {
+        List<ProxyTestData> testDataList = new ArrayList<>();
+
+        for (int i = 1; i <= sheet.getLastRowNum(); i++) { // Start from row 1 (skip headers)
+            Row row = sheet.getRow(i);
+            if (row == null) continue;
+
+            String skipValue = getCellData(row, "Skip");
+            if (!"N".equalsIgnoreCase(skipValue)) continue; // Skip rows where "Skip" is not "N"
+
+            ProxyTestData data = new ProxyTestData();
+            data.setRowIndex(i);
+            data.setProxyUser(getCellData(row, "Proxy"));
+            data.setAccountName(getCellData(row, "IN-AccountName"));
+
+            // Store dynamic IN-* fields in a map
+            Map<String, String> inputFields = new HashMap<>();
+            for (String colName : columnIndexMap.keySet()) {
+                if (colName.startsWith("IN-")) {
+                    inputFields.put(colName, getCellData(row, colName));
+                }
+            }
+            data.setInputFields(inputFields);
+
+            testDataList.add(data);
+        }
+        return testDataList;
+    }
+
+    private String getCellData(Row row, String columnName) {
+        Integer colIndex = columnIndexMap.get(columnName);
+        if (colIndex != null) {
+            Cell cell = row.getCell(colIndex);
+            return (cell != null) ? cell.toString().trim() : "";
+        }
+        return "";
+    }
+
+    public void writeResults(Map<Integer, String> results, String outputFilePath) throws Exception {
+        try (FileOutputStream fos = new FileOutputStream(outputFilePath)) {
+            Sheet sheet = workbook.getSheetAt(0);
+
+            int resultColumnIndex = columnIndexMap.getOrDefault("O-Result", -1);
+            if (resultColumnIndex == -1) {
+                throw new RuntimeException("Column 'O-Result' not found.");
+            }
+
+            // Write results
+            for (Map.Entry<Integer, String> entry : results.entrySet()) {
+                Row row = sheet.getRow(entry.getKey());
+                if (row != null) {
+                    Cell cell = row.createCell(resultColumnIndex, CellType.STRING);
+                    cell.setCellValue(entry.getValue());
+                }
+            }
+
+            workbook.write(fos);
+            System.out.println("✅ Test results saved in: " + outputFilePath);
+        }
+    }
+}
+
+
+
+3️⃣ Selenium Test Class (ProxyTest.java)
+This: ✅ Uses @DataProvider to dynamically fetch test data.
+✅ Runs tests and fills form fields dynamically.
+✅ Saves PASS/FAIL results in an output Excel file.
+
+
+
+
+package tests;
+
+import models.ProxyTestData;
+import org.openqa.selenium.*;
+import org.openqa.selenium.chrome.ChromeDriver;
+import org.testng.annotations.*;
+import utils.ExcelUtils;
+
+import java.util.*;
+
+public class ProxyTest {
+    private WebDriver driver;
+    private ExcelUtils excel;
+    private Map<Integer, String> testResults = new HashMap<>();
+    private static final String INPUT_FILE_PATH = "src/test/resources/testdata/ProxyDataSheet.xlsx";
+    private static final String OUTPUT_FILE_PATH = "src/test/resources/testdata/ProxyDataSheet_Output.xlsx";
+
+    @BeforeClass
+    public void setUp() throws Exception {
+        driver = new ChromeDriver();
+        driver.manage().window().maximize();
+        excel = new ExcelUtils(INPUT_FILE_PATH);
+    }
+
+    @DataProvider(name = "proxyDataProvider")
+    public Object[][] provideTestData() throws Exception {
+        List<ProxyTestData> testDataList = excel.getTestData();
+        return testDataList.stream().map(data -> new Object[]{data}).toArray(Object[][]::new);
+    }
+
+    @Test(dataProvider = "proxyDataProvider")
+    public void executeProxyTests(ProxyTestData testData) {
+        try {
+            driver.get("https://your-application-url.com");
+
+            // Fill out form dynamically
+            driver.findElement(By.name("accountName")).sendKeys(testData.getAccountName());
+
+            for (Map.Entry<String, String> entry : testData.getInputFields().entrySet()) {
+                String fieldName = entry.getKey().substring(3); // Remove "IN-" prefix
+                WebElement inputField = driver.findElement(By.name(fieldName));
+                inputField.sendKeys(entry.getValue());
+            }
+
+            driver.findElement(By.id("submitButton")).click();
+
+            // Validate result
+            boolean testPassed = driver.findElement(By.id("successMessage")).isDisplayed();
+            testResults.put(testData.getRowIndex(), testPassed ? "PASS" : "FAIL");
+
+        } catch (Exception e) {
+            testResults.put(testData.getRowIndex(), "ERROR: " + e.getMessage());
+        }
+    }
+
+    @AfterClass
+    public void tearDown() throws Exception {
+        if (driver != null) driver.quit();
+        excel.writeResults(testResults, OUTPUT_FILE_PATH);
+    }
+}
+
+
+
+
+Key Takeaways
+✅ Readability Improved – Clear separation of responsibilities.
+✅ Less Code, More Clarity – No unnecessary loops or complexity.
+✅ Dynamically Handles Columns – "IN-*" fields mapped automatically.
+✅ Writes Back Results – "O-Result" column updated automatically.
+
+
+
+
+
+Expected Output: ProxyDataSheet_Output.xlsx
+Proxy	Skip	IN-AccountName	IN-Field1	IN-Field2	O-Result
+User1	N	TestAcc1	Value1	Value2	PASS
+User2	N	TestAcc2	Value3	Value4	FAIL
+User3	N	TestAcc3	Value5	Value6	PASS
+
+
+
+Next Steps
+Want log files or screenshots on failure?
+Need better exception handling?
+Want Cucumber BDD instead of TestNG?
+Let me know how I can improve this for you! 😊
