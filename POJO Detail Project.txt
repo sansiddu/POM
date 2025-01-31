@@ -1,0 +1,196 @@
+package models;
+
+import lombok.Data;
+
+@Data
+public class ProxyTestData {
+    private int rowIndex;
+    private String proxyUser;
+    private String accountName;
+    private Map<String, String> inputFields;
+}
+
+
+
+💡 Explanation
+rowIndex → Stores Excel row index for writing results.
+proxyUser → Stores the Proxy User column value.
+accountName → Stores the IN-AccountName value.
+inputFields → A Map to store dynamic "IN-*" column values.
+
+
+2️⃣ Excel Utility Class: ExcelUtils.java
+This reads data, filters "Skip = N", and stores it in ProxyTestData.
+
+package utils;
+
+import models.ProxyTestData;
+import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import java.io.File;
+import java.io.FileInputStream;
+import java.util.*;
+
+public class ExcelUtils {
+    private Workbook workbook;
+    private Sheet sheet;
+    private Map<String, Integer> columnIndexMap = new HashMap<>();
+
+    public ExcelUtils(String filePath) throws Exception {
+        FileInputStream fis = new FileInputStream(new File(filePath));
+        workbook = new XSSFWorkbook(fis);
+        sheet = workbook.getSheetAt(0); // First sheet
+        loadColumnIndexMap();
+    }
+
+    private void loadColumnIndexMap() {
+        Row headerRow = sheet.getRow(0);
+        for (Cell cell : headerRow) {
+            columnIndexMap.put(cell.getStringCellValue().trim(), cell.getColumnIndex());
+        }
+    }
+
+    public List<ProxyTestData> getTestData() {
+        List<ProxyTestData> testDataList = new ArrayList<>();
+        
+        for (int i = 1; i <= sheet.getLastRowNum(); i++) { // Start from row 1 (skip headers)
+            Row row = sheet.getRow(i);
+            if (row == null) continue;
+
+            String skipValue = getCellData(row, "Skip");
+            if (!"N".equalsIgnoreCase(skipValue)) continue; // Ignore if Skip != "N"
+
+            ProxyTestData data = new ProxyTestData();
+            data.setRowIndex(i);
+            data.setProxyUser(getCellData(row, "Proxy"));
+            data.setAccountName(getCellData(row, "IN-AccountName"));
+
+            // Store dynamic IN-* fields in a map
+            Map<String, String> inputFields = new HashMap<>();
+            for (String columnName : columnIndexMap.keySet()) {
+                if (columnName.startsWith("IN-")) {
+                    inputFields.put(columnName, getCellData(row, columnName));
+                }
+            }
+            data.setInputFields(inputFields);
+
+            testDataList.add(data);
+        }
+        return testDataList;
+    }
+
+    public String getCellData(Row row, String columnName) {
+        Integer colIndex = columnIndexMap.get(columnName);
+        if (colIndex != null) {
+            Cell cell = row.getCell(colIndex);
+            return (cell != null) ? cell.toString().trim() : "";
+        }
+        return "";
+    }
+}
+
+
+
+
+Explanation
+Loads Excel sheet and maps column names to indices.
+Filters rows where "Skip" = "N".
+Stores "Proxy", "IN-AccountName", and other "IN-*" fields dynamically in a Map<String, String>.
+Returns a List of ProxyTestData objects.
+
+
+
+
+
+3️⃣ Selenium Code to Use Extracted Data
+Now, we use Selenium to enter "IN-AccountName" and other "IN-*" fields.
+
+
+package tests;
+
+import models.ProxyTestData;
+import org.openqa.selenium.By;
+import org.openqa.selenium.WebDriver;
+import org.openqa.selenium.WebElement;
+import org.testng.annotations.*;
+import pages.ProxyPage;
+import utils.ExcelUtils;
+import java.util.List;
+import java.util.Map;
+
+public class ProxyTest {
+    private WebDriver driver;
+    private ProxyPage proxyPage;
+    private ExcelUtils excel;
+    private static final String FILE_PATH = "src/test/resources/testdata/ProxyDataSheet.xlsx";
+
+    @BeforeClass
+    public void setUp() throws Exception {
+        driver = new ChromeDriver();
+        driver.manage().window().maximize();
+        proxyPage = new ProxyPage(driver);
+        excel = new ExcelUtils(FILE_PATH);
+    }
+
+    @DataProvider(name = "proxyDataProvider")
+    public Object[][] provideTestData() throws Exception {
+        List<ProxyTestData> testDataList = excel.getTestData();
+        return testDataList.stream().map(data -> new Object[]{data}).toArray(Object[][]::new);
+    }
+
+    @Test(dataProvider = "proxyDataProvider")
+    public void executeProxyTests(ProxyTestData testData) {
+        driver.get("https://your-application-url.com");
+
+        // Set Account Name
+        WebElement accountField = driver.findElement(By.name("accountName"));
+        accountField.sendKeys(testData.getAccountName());
+
+        // Set IN-* Fields
+        for (Map.Entry<String, String> entry : testData.getInputFields().entrySet()) {
+            String fieldName = entry.getKey().substring(3); // Remove "IN-" prefix
+            String fieldValue = entry.getValue();
+            
+            WebElement inputField = driver.findElement(By.name(fieldName));
+            inputField.sendKeys(fieldValue);
+        }
+
+        // Submit Form
+        driver.findElement(By.id("submitButton")).click();
+        
+        // Validation (Example: Check Success Message)
+        WebElement successMessage = driver.findElement(By.id("successMessage"));
+        assert successMessage.isDisplayed();
+    }
+
+    @AfterClass
+    public void tearDown() {
+        if (driver != null) {
+            driver.quit();
+        }
+    }
+}
+
+
+
+ How This Works
+1️⃣ Fetching Data
+The Excel file is loaded in ExcelUtils.java.
+It extracts rows where "Skip" = "N".
+Stores "Proxy", "IN-AccountName", and other "IN-*" fields dynamically.
+2️⃣ Using Data in Selenium
+TestNG’s @DataProvider dynamically passes data to executeProxyTests().
+Finds "IN-AccountName" field and enters the value.
+Loops through all "IN-*" fields, extracts names dynamically, and enters values.
+Clicks submit and validates success message.
+🎯 Key Takeaways
+✅ Lombok (@Data) simplifies getters/setters.
+✅ Dynamic Column Handling (No hardcoded "IN-*" field names).
+✅ Selenium + TestNG Integration using @DataProvider.
+✅ Scalable POM Framework structure.
+
+🚀 Next Steps
+Do you need Excel Writeback (Pass/Fail results) in "O-*" columns?
+Want to add explicit waits for better stability?
+Need Cucumber BDD integration instead of TestNG?
+Let me know how I can refine this further! 😊
